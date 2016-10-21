@@ -1,4 +1,5 @@
 from collections import deque, namedtuple
+import numpy as np
 
 Experiecne = namedtuple('Experience', 'state0, action, reward, state1')
 

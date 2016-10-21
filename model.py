@@ -106,7 +106,7 @@ class DDPG(object):
             # until having enough data, just do nothing
             if t < self.n_history:
                 action = np.zeros(self.n_stock)
-                renard = 0
+                reward = 0
                 memory.append(stock_data[t], action, reward)
                 continue
             price = stock_data[t]
