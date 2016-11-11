@@ -29,7 +29,8 @@ def main():
     test_input = input_data.loc[(input_data.index >= test_st) & (input_data.index <= test_end)]
     
     # training
-    config = DDPGConfig()
+    n_stock = len(train_input.values[0])
+    config = DDPGConfig(n_stock)
     ddpg = DDPG(config)
     values = ddpg.train(train_input)
     
