@@ -13,17 +13,17 @@ def main():
     symbols = utils.get_sap_symbols('sap500')
     np.random.shuffle(symbols)
     chosen_symbols = symbols[:10]
-    start_date="2010-04-01"
-    end_date="2016-03-31"
+    start_date="2009-04-01"
+    end_date="2015-03-31"
     # use Open data
     input_data = utils.get_data_list_key(chosen_symbols, start_date, end_date)
     elapsed = time.time() - st
     print ("time for getting data:", elapsed)
 
-    train_st = pd.Timestamp("2010-04-01")
-    train_end = pd.Timestamp("2013-03-31")
-    test_st = pd.Timestamp("2013-04-01")
-    test_end = pd.Timestamp("2016-03-31")
+    train_st = pd.Timestamp("2009-04-01")
+    train_end = pd.Timestamp("2012-03-31")
+    test_st = pd.Timestamp("2012-04-01")
+    test_end = pd.Timestamp("2015-03-31")
 
     train_input = input_data.loc[(input_data.index >= train_st) & (input_data.index <= train_end)]
     test_input = input_data.loc[(input_data.index >= test_st) & (input_data.index <= test_end)]

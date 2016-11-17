@@ -40,6 +40,7 @@ class SequentialMemory(object):
         self.rewards = RingBuffer(limit)
         self.observations = RingBuffer(limit)
         self.batch_idx = None
+
         
     def sample(self, batch_size, window_length, alpha=1.0, beta=1.0, epsilon=0.05):
         # udpate priority when sampling

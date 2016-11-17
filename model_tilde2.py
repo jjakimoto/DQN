@@ -9,7 +9,7 @@ from keras.layers.core import Dense
 from keras.engine.topology import Merge
 from keras.layers.advanced_activations import PReLU
 from keras.layers import SpatialDropout2D
-from keras.layers import Dropout
+from keras.layers import Dropout, Reshape
 from keras import backend as K
 import numpy as np
 import pandas as pd
@@ -74,7 +74,7 @@ class DDPG(object):
         self.lr = config.learning_rate
         self.memory_length = config.memory_length
         self.n_memory = config.n_memory
-        self.noise_scale = config.noise_scale
+        self.action_scale = config.action_scale
         # the length of the data as input
         self.n_history = max(self.n_smooth + self.history_length, (self.n_down + 1) * self.history_length)
         print ("building model....")
@@ -89,7 +89,7 @@ class DDPG(object):
                 self.build_model()
         print('finished building model!')
     
-    def train(self, input_data):
+    def train(self, input_data, noise_scale=0.1):
         self.max_action = 100
         """training DDPG, where action is confined to integer space
         
@@ -99,6 +99,7 @@ class DDPG(object):
         stock_data = input_data.values
         date = input_data.index
         T = len(stock_data)
+        self.noise_scale = noise_scale
         
         # frequency for output
         print_freq = int(T / 10)
@@ -118,7 +119,7 @@ class DDPG(object):
         date_label.append(date[0])
         # keep half an year data 
         t0 = self.n_history + self.n_batch
-        self.initialize_memory(stock_data[:t0])
+        self.initialize_memory(stock_data[:t0], scale=10)
         plot_freq = 10
         save_freq = 10
         count = 0
@@ -133,7 +134,7 @@ class DDPG(object):
                 # select transition from pool
                 self.update_weight()
                 # update prioritizing paramter untill it goes over 1
-                # self.beta  += db
+                self.beta  += db
                 if self.beta >= 1.0:
                     self.beta = 1.0
                  
@@ -159,13 +160,6 @@ class DDPG(object):
         print ("finished training")
            
         return pd.DataFrame(values, index=pd.DatetimeIndex(date_label))
-    
-    def norm_action(self, action):
-        max_action = np.max(np.abs(action))
-        if max_action > 1:
-            return action / max_action
-        else:
-            return action
     
     def predict_action(self, state):
         """Preduct Optimal Portfolio
@@ -216,15 +210,19 @@ class DDPG(object):
         weights = [self.update_rate * new_w + (1 - self.update_rate) * old_w
                    for new_w, old_w in zip(new_weights, old_weights)]
         self.critic_target.set_weights(weights)
+        old_weights = self.feature_target.get_weights()
+        new_weights = self.feature.get_weights()
+        weights = [self.update_rate * new_w + (1 - self.update_rate) * old_w
+                   for new_w, old_w in zip(new_weights, old_weights)]
+        self.feature_target.set_weights(weights)
         
-    def initialize_memory(self, stocks):
+    def initialize_memory(self, stocks, scale=10):
         self.memory = []
         for i in range(self.n_memory):
             self.memory.append(SequentialMemory(self.memory_length))
         for t in range(len(stocks) - 1):
             for idx_memory in range(self.n_memory):
-                action = np.random.normal(0, self.noise_scale, self.n_stock)
-                action = self.norm_action(action)
+                action = np.random.normal(0, scale, self.n_stock)
                 reward = np.sum((stocks[t + 1] - stocks[t]) * action)
                 self.memory[idx_memory].append(stocks[t], action, reward)
         
@@ -240,9 +238,9 @@ class DDPG(object):
                                       feed_dict={self.state: pred_state,
                                                           K.learning_phase(): 0})[-1]
         # action_off = np.round(actor_value_off + np.random.normal(0, noise_scale, self.n_stock))
+        var = np.mean(actor_action ** 2)
         for i in range(self.n_memory):
-            action_off = actor_action + np.random.normal(0, self.noise_scale, self.n_stock)
-            action_off = self.norm_action(action_off)
+            action_off = actor_action + np.random.normal(0, np.sqrt(var) * self.noise_scale, self.n_stock)
             # action_off = actor_value_off
             reward_off = reward = np.sum((state_forward - state) * action_off)
             self.memory[i].rewards.append(reward_off)
@@ -266,8 +264,8 @@ class DDPG(object):
         critic network input: [raw_data, smoothed, downsampled, action]
         actor network input: [raw_data, smoothed, downsampled]
         """
-        self.critic = self.build_critic()
-        self.critic_target = self.build_critic()
+        self.feature = self.build_feature()
+        self.feature_target = self.build_feature()
         # actor network input should be [raw_data, smoothed, downsampled]
         self.actor = self.build_actor()
         # transform input into the several scales and smoothing
@@ -281,13 +279,34 @@ class DDPG(object):
         
         # build graph for citic training
         self.action = tf.placeholder(tf.float32, [None, self.n_stock])
-        input_q = [raw,] +  smoothed + down + [self.action,]
-        self.Q = tf.squeeze(self.critic(input_q))
+        in_feat = [raw,] +  smoothed + down
+        out_feat = self.feature(in_feat)
+        # print(out_feat.get_shape())
+        out_feat = tf.transpose(out_feat, [1, 3, 0, 2])
+        in_q = out_feat * self.action
+        # print(in_q.get_shape())
+        in_q = tf.transpose(in_q, [2, 0, 3, 1])
+        input_shape = in_q.get_shape()[1:]
+        # print(input_shape)
+        self.critic = self.build_critic(input_shape)
+        self.Q = tf.squeeze(self.critic(in_q))
+        # build graph for actor training
+        self.actor_output = self.actor(in_feat)
+        in_q_actor = out_feat *  self.actor_output
+        # print(in_q_actor.get_shape())
+        in_q_actor = tf.transpose(in_q_actor, [2, 0, 3, 1])
+        self.Q_actor = tf.squeeze(self.critic(in_q_actor))
         # target network
         # for double q-learning we use actor network not for target network
-        self.actor_target_output = self.actor([raw_target,] +  smoothed_target + down_target)
-        input_q_target = [raw_target,] +  smoothed_target + down_target + [self.actor_target_output,]
-        Q_target = tf.squeeze(self.critic_target(input_q_target))
+        in_feat = [raw_target,] +  smoothed_target + down_target
+        self.out_actor_target = self.actor(in_feat)
+        out_feat = self.feature_target(in_feat)
+        out_feat = tf.transpose(out_feat, [1, 3, 0, 2])
+        # print(self.out_actor_target.get_shape())
+        in_q = out_feat * self.out_actor_target
+        in_q = tf.transpose(in_q, [2, 0, 3, 1])
+        self.critic_target = self.build_critic(input_shape)
+        Q_target = tf.squeeze(self.critic_target(in_q))
         self.reward = tf.placeholder(tf.float32, [None], name='reward')
         target = self.reward  + self.gamma * Q_target
         self.target_value = self.reward  + self.gamma * Q_target
@@ -299,12 +318,7 @@ class DDPG(object):
         # TD-error for priority
         self.error = tf.abs(target - self.Q)
         self.critic_optim = tf.train.AdamOptimizer(self.learning_rate) \
-            .minimize(self.loss, var_list=self.critic.trainable_weights)
-        
-        # build graph for actor training
-        self.actor_output = self.actor([raw,] +  smoothed + down)
-        input_q_actor = [raw,] +  smoothed + down + [self.actor_output,]
-        self.Q_actor = tf.squeeze(self.critic(input_q_actor))
+            .minimize(self.loss, var_list=self.critic.trainable_weights + self.feature.trainable_weights)
         # optimization
         self.actor_optim = tf.train.AdamOptimizer(self.learning_rate) \
             .minimize(-self.Q_actor, var_list=self.actor.trainable_weights)
@@ -323,8 +337,10 @@ class DDPG(object):
             tf.initialize_all_variables().run(session=self.sess)
             weights = self.critic.get_weights()
             self.critic_target.set_weights(weights)
-        
-    def build_critic(self):
+            weights = self.feature.get_weights()
+            self.feature_target.set_weights(weights)
+            
+    def build_feature(self):
         """Build critic network
         
         recieve convereted tensor: raw_data, smooted_data, and downsampled_data
@@ -358,17 +374,18 @@ class DDPG(object):
         merged_state = Sequential()
         merged_state.add(merged)
         merged_state.add(Convolution2D(nb_filter=nf, nb_row=self.k_w, nb_col=1, border_mode='same'))
-        merged_state.add(BatchNormalization(mode=2, axis=-1))
-        merged_state.add(PReLU())
-        merged_state.add(Flatten())
-        # layer3
-        action = Sequential()
-        action.add(Lambda(lambda x: x, input_shape=(self.n_stock,)))
-        action.add(BatchNormalization(mode=1, axis=-1))
-        merged = Merge([merged_state, action], mode='concat')
+        return merged_state
+        
+    def build_critic(self, input_shape):
+        """Build critic network
+        
+        recieve convereted tensor: raw_data, smooted_data, and downsampled_data
+        """
+        nf = self.n_feature
         model = Sequential()
-        model.add(merged)
-        model.add(Dense(self.n_hidden))
+        model.add(Lambda(lambda x: x,  input_shape=input_shape))
+        model.add(Flatten())
+        model.add(Dense(self.n_hidden, input_shape=input_shape))
         model.add(BatchNormalization(mode=1, axis=-1))
         model.add(PReLU())
         # layer4
@@ -424,6 +441,11 @@ class DDPG(object):
         model.add(Dense(self.n_stock, activation='tanh'))
         return model
     
+    def norm_action(self, action):
+        if np.max(action) > self.max_action:
+            return action / np.max(action)
+        else:
+            return action
     
     def transform_input(self, input):
         """Transform data into the Multi Scaled one
