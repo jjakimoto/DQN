@@ -22,3 +22,26 @@ class DDPGConfig(object):
         self.memory_length = 200
         self.n_memory = 10
         self.noise_scale = 0.2
+        
+class DQNConfig(object):
+    device = '/cpu:0'
+    save_path = '/home/tomoaki/work/github/DQN/DDPG_model.ckpt'
+    is_load = False
+    gamma = 1 - 1.0e-4
+    history_length = 10
+    n_stock = n_stock
+    n_smooth = 5
+    n_down = 5
+    k_w = 3
+    n_hidden = 100
+    n_batch = 32
+    n_epochs = 100
+    n_feature = 32
+    alpha = 0.7
+    beta = 0.5
+    update_rate = 1e-1
+    learning_rate = 1e-3
+    
+    # memory_config
+    memory_length = 200
+    n_memory = 1
