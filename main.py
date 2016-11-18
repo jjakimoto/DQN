@@ -2,13 +2,12 @@ import warnings
 import numpy as np
 import pandas as pd
 import time
+import sys
 # local library
 import utils
-from model import DDPG
-from config import DDPGConfig
 
 
-def main():
+def main(arg):
     st = time.time()
     symbols = utils.get_sap_symbols('sap500')
     np.random.shuffle(symbols)
@@ -30,9 +29,25 @@ def main():
     
     # training
     n_stock = len(train_input.values[0])
-    config = DDPGConfig(n_stock)
-    ddpg = DDPG(config)
-    values = ddpg.train(train_input)
+    sys.path.append("./model")
+    print(arg)
+
+
+    if arg == "ddpg":
+        from ddpg import DDPG
+        from config import DDPGConfig
+        config = DDPGConfig(n_stock)
+        ddpg = DDPG(config)
+        values = ddpg.train(train_input)
+    elif arg == "dqn":
+        from dqn import DQN
+        from config import DQNConfig
+        config = DQNConfig(n_stock)
+        dqn = DQN(config)
+        values = dqn.train(train_data)
+        return values
+    else:
+        return None
     
     # prediction
     profit = []
@@ -62,8 +77,10 @@ def main():
         for i in range(100):
             ddpg.update_weight()
         old_value = value
-    
+    result = pd.DataFrame(profit, index=pd.DatetimeIndex(date))
+    return result
     
 if __name__ == '__main__':
+    arg = sys.argv[1]
     warnings.filterwarnings("ignore")
-    main()
+    result = main(arg)
