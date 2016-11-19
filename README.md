@@ -17,7 +17,16 @@ When is optimal to sell out stocks is challenging task. I implemented the follow
 The figure below is a learned result from 01/04/2015 to 01/04/2016. The blue points inidiate points where it's better to sell stocks if you have.
 
 ![exit](https://github.com/jjakimoto/DQN/blob/master/assets/exit_result.jpg)
- 
+
+Edit DQNConfig of config.py from
+```
+self.save_path = '/path/to/your/save/path/model.ckpt'
+```
+to your save path. Then, you can try
+```
+python main.py "dqn"
+```
+
 
 ## Optimal Portfolio
 Constructing optimal portfolio that makes profits safely is important for fund management. I implemented an algorithm to prdocue portfolios that makes profits. A learning algorighm is based on [DDPG](https://arxiv.org/pdf/1509.02971v5.pdf).
@@ -25,3 +34,12 @@ The figure below is a trading result.
 After learned with data from 01/04/2012 to 01/04/2013, trade on data from 01/04/2013 to 01/04/2014.
 
 ![trade](https://github.com/jjakimoto/DQN/blob/master/assets/trade_result.jpg)
+
+Edit DDPGConfig of config.py from
+```
+self.save_path = '/path/to/your/save/path/model.ckpt'
+```
+to your save path. Then, you can try
+```
+python main.py "ddpg"
+```
