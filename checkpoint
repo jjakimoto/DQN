@@ -1,2 +1,0 @@
-model_checkpoint_path: "/home/tomoaki/work/github/DQN/DQN_model.ckpt"
-all_model_checkpoint_paths: "/home/tomoaki/work/github/DQN/DQN_model.ckpt"
