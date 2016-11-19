@@ -13,8 +13,8 @@ input_data = utils.get_data_list_key('2015-04-01', '2016-04-01', symbols, 'Open'
 
 We have two models:
 ## Exit Rule
-When is optimal to sell out stocks is challenging task. I implemented the following alogrithm to determine if selling out stocks is more profitable than holding stocks. A learning is based on based on [DQN](http://www.nature.com/nature/journal/v518/n7540/full/nature14236.html). To give stability, I introduced [Double Q-Learning](https://www.aaai.org/Conferences/AAAI/2016/Papers/12vanHasselt12389.pdf).
-The figure below is a learned result from 01/04/2015 to 01/04/2016. The blue points inidiate the point where it's better to sell stocks if you have some.
+When is optimal to sell out stocks is challenging task. I implemented the following alogrithm to determine if selling out stocks is more profitable than holding stocks. A learning is based on based on [DQN](http://www.nature.com/nature/journal/v518/n7540/full/nature14236.html). To give stability, I introduced [Double Q-Learning](https://www.aaai.org/Conferences/AAAI/2016/Papers/12vanHasselt12389.pdf).\\
+The figure below is a learned result from 01/04/2015 to 01/04/2016. The blue points inidiate points where it's better to sell stocks if you have.
 
 ![exit](https://github.com/jjakimoto/DQN/blob/master/assets/exit_result.jpg)
  
