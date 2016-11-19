@@ -44,7 +44,7 @@ def main(arg):
         from config import DQNConfig
         config = DQNConfig(n_stock)
         dqn = DQN(config)
-        values = dqn.train(train_data)
+        values = dqn.train(train_input)
         return values
     else:
         return None
