@@ -61,13 +61,10 @@ class DDPG(object):
         self.gamma = config.gamma
         self.history_length = config.history_length
         self.n_stock = config.n_stock
-        self.n_feature = config.n_feature
         self.n_smooth = config.n_smooth
         self.n_down = config.n_down
-        self.k_w = config.k_w
-        self.n_hidden = config.n_hidden
         self.n_batch = config.n_batch
-        self.n_epochs = config.n_epochs
+        self.n_epoch = config.n_epoch
         self.update_rate = config.update_rate
         self.alpha = config.alpha
         self.beta = config.beta
@@ -75,6 +72,7 @@ class DDPG(object):
         self.memory_length = config.memory_length
         self.n_memory = config.n_memory
         self.noise_scale = config.noise_scale
+        self.model_config = config.model_config
         # the length of the data as input
         self.n_history = max(self.n_smooth + self.history_length, (self.n_down + 1) * self.history_length)
         print ("building model....")
@@ -120,7 +118,7 @@ class DDPG(object):
         t0 = self.n_history + self.n_batch
         self.initialize_memory(stock_data[:t0])
         plot_freq = 10
-        save_freq = 10
+        save_freq = 100000
         count = 0
         for t in range(t0, T - 1):
             self.update_memory(stock_data[t], stock_data[t+1])
@@ -129,7 +127,7 @@ class DDPG(object):
             date_label.append(date[t+1])
             values.append(value)
             count += 1
-            for epoch in range(self.n_epochs):    
+            for epoch in range(self.n_epoch):    
                 # select transition from pool
                 self.update_weight()
                 # update prioritizing paramter untill it goes over 1
@@ -239,9 +237,10 @@ class DDPG(object):
         actor_action = self.actor_output.eval(session=self.sess,
                                       feed_dict={self.state: pred_state,
                                                           K.learning_phase(): 0})[-1]
+        action_scale = np.mean(np.abs(actor_action))
         # action_off = np.round(actor_value_off + np.random.normal(0, noise_scale, self.n_stock))
         for i in range(self.n_memory):
-            action_off = actor_action + np.random.normal(0, self.noise_scale, self.n_stock)
+            action_off = actor_action + np.random.normal(0, action_scale * self.noise_scale, self.n_stock)
             action_off = self.norm_action(action_off)
             # action_off = actor_value_off
             reward_off = reward = np.sum((state_forward - state) * action_off)
@@ -320,7 +319,7 @@ class DDPG(object):
         
         # initialize network
         if is_initialize:
-            tf.initialize_all_variables().run(session=self.sess)
+            tf.global_variables_initializer().run(session=self.sess)
             weights = self.critic.get_weights()
             self.critic_target.set_weights(weights)
         
@@ -329,53 +328,18 @@ class DDPG(object):
         
         recieve convereted tensor: raw_data, smooted_data, and downsampled_data
         """
-        nf = self.n_feature
-        # layer1
-        # smoothed input
-        sm_model = [Sequential() for _ in range(self.n_smooth)]
-        for m in sm_model:
-            m.add(Lambda(lambda x: x,  input_shape=(self.history_length, self.n_stock, 1)))
-            m.add(Convolution2D(nb_filter=nf, nb_row=self.k_w, nb_col=1, border_mode='same'))
-            m.add(BatchNormalization(mode=2, axis=-1))
-            m.add(PReLU())
-        # down sampled input
-        dw_model = [Sequential() for _ in range(self.n_down)]
-        for m in dw_model:
-            m.add(Lambda(lambda x: x,  input_shape=(self.history_length, self.n_stock, 1)))
-            m.add(Convolution2D(nb_filter=nf, nb_row=self.k_w, nb_col=1, border_mode='same'))
-            m.add(BatchNormalization(mode=2, axis=-1))
-            m.add(PReLU())
-        # raw input
-        state = Sequential()
-        nf = self.n_feature
-        state.add(Lambda(lambda x: x,  input_shape=(self.history_length, self.n_stock, 1)))
-        state.add(Convolution2D(nb_filter=nf, nb_row=self.k_w, nb_col=1, border_mode='same'))
-        state.add(BatchNormalization(mode=2, axis=-1))
-        state.add(PReLU())
-        merged = Merge([state,] + sm_model + dw_model, mode='concat', concat_axis=-1)
-        # layer2
-        nf = nf * 2
-        merged_state = Sequential()
-        merged_state.add(merged)
-        merged_state.add(Convolution2D(nb_filter=nf, nb_row=self.k_w, nb_col=1, border_mode='same'))
-        merged_state.add(BatchNormalization(mode=2, axis=-1))
-        merged_state.add(PReLU())
-        merged_state.add(Flatten())
-        # layer3
-        action = Sequential()
-        action.add(Lambda(lambda x: x, input_shape=(self.n_stock,)))
-        action.add(BatchNormalization(mode=1, axis=-1))
-        merged = Merge([merged_state, action], mode='concat')
+        # lower layer
+        lower_model = [self.build_network(self.model_config['critic_lower'], input_shape=(self.history_length, self.n_stock, 1)) 
+                       for _ in range(1  + self.n_smooth + self.n_down)]
+        merged = Merge(lower_model, mode='concat')
+        # upper layer
+        upper_model = self.build_network(self.model_config['critic_upper'],  model=merged)
+        # action layer
+        action = self.build_network(self.model_config['critic_action'], input_shape=(self.n_stock,), is_conv=False)
+        # output layer
+        merged = Merge([upper_model, action], mode='mul')
         model = Sequential()
         model.add(merged)
-        model.add(Dense(self.n_hidden))
-        model.add(BatchNormalization(mode=1, axis=-1))
-        model.add(PReLU())
-        # layer4
-        # to stabilize, get rid of Batch Normalization at the last layer
-        model.add(Dense(int(np.sqrt(self.n_hidden))))
-        model.add(PReLU())
-        # output
         model.add(Dense(1))
         return model
     
@@ -384,44 +348,43 @@ class DDPG(object):
         
         recieve convereted tensor: raw_data, smooted_data, and downsampled_data
         """
-        nf = self.n_feature
-        # layer1
-        # smoothed input
-        sm_model = [Sequential() for _ in range(self.n_smooth)]
-        for m in sm_model:
-            m.add(Lambda(lambda x: x,  input_shape=(self.history_length, self.n_stock, 1)))
-            m.add(Convolution2D(nb_filter=nf, nb_row=self.k_w, nb_col=1, border_mode='same'))
-            m.add(BatchNormalization(mode=2, axis=-1))
-            m.add(PReLU())
-        # down sampled input
-        dw_model = [Sequential() for _ in range(self.n_down )]
-        for m in dw_model:
-            m.add(Lambda(lambda x: x,  input_shape=(self.history_length, self.n_stock, 1)))
-            m.add(Convolution2D(nb_filter=nf, nb_row=self.k_w, nb_col=1, border_mode='same'))
-            m.add(BatchNormalization(mode=2, axis=-1))
-            m.add(PReLU())
-        # raw input     
-        state = Sequential()
-        state.add(Lambda(lambda x: x,  input_shape=(self.history_length, self.n_stock, 1)))
-        state.add(Convolution2D(nb_filter=nf, nb_row=self.k_w, nb_col=1, border_mode='same'))
-        state.add(BatchNormalization(mode=2, axis=-1))
-        state.add(PReLU())
-        merged = Merge([state,] + sm_model + dw_model, mode='concat')
-        # layer2
-        nf = nf * 2
+        # lower layer
+        lower_model = [self.build_network(self.model_config['actor_lower'], input_shape=(self.history_length, self.n_stock, 1)) 
+                       for _ in range(1  + self.n_smooth + self.n_down)]
+        merged = Merge(lower_model, mode='concat')
+        # upper layer
+        model = self.build_network(self.model_config['actor_upper'],  model=merged)
+        return model
+    
+    def build_network(self, conf, model=None, input_shape=None, is_conv=True):
+        """Build network"""
+        _model = model
         model = Sequential()
-        model.add(merged)
-        model.add(Convolution2D(nb_filter=nf, nb_row=self.k_w, nb_col=1, border_mode='same'))
-        model.add(BatchNormalization(mode=2 , axis=-1))
-        model.add(PReLU())
-        model.add(Flatten())
-        # layer3
-        # to stabilize, get rid of Batch Normalization at the last layer
-        model.add(Dense(self.n_hidden))
-        model.add(BatchNormalization(mode=1 , axis=-1))
-        model.add(PReLU())
-        # output
-        model.add(Dense(self.n_stock, activation='tanh'))
+        if _model is None:
+            model.add(Lambda(lambda x: x,  input_shape=input_shape))
+        else:
+            model.add(_model)
+            
+        for x in conf:
+            if x['is_drop']:
+                model.add(Dropout(x['drop_rate']))
+            if x['type'] is 'full':
+                if is_conv:
+                    model.add(Flatten())
+                    is_conv = False
+                model.add(Dense(x['n_feature']))
+            elif x['type'] is 'conv':
+                model.add(Convolution2D(nb_filter=x['n_feature'], 
+                                        nb_row=x['kw'], 
+                                        nb_col=1, 
+                                        border_mode='same'))  
+                is_conv=True
+            if x['is_batch']:
+                if x['type'] is 'full':
+                    model.add(BatchNormalization(mode=1, axis=-1))
+                if x['type'] is 'conv':
+                    model.add(BatchNormalization(mode=2, axis=-1))
+            model.add(x['activation'])
         return model
     
     
