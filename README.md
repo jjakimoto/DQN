@@ -8,7 +8,7 @@ import utils
 # fetch symbols from yahoo finance
 symbols = utils.get_sap_symbols('sap500')
 # fetch Open value from 01/04/2015 to 01/04/2016
-input_data = utils.get_data_list_key('2015-04-01', '2016-04-01', symbols, 'Open')
+input_data = utils.get_data_list_key(symbols, '2015-04-01', '2016-04-01', 'Open')
 ```
 
 We have two models:
